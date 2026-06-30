@@ -538,6 +538,7 @@ function loadWave(file){
   ws=WaveSurfer.create({
     container:'#waveform', waveColor:'rgba(200,200,225,.20)', progressColor:'#7c6cf0',
     cursorColor:'#fff', cursorWidth:2, height:120, normalize:true, plugins:[wsR],
+    interact:true, dragToSeek:{debounceTime:0},
   })
   ws.on('ready',()=>{
     dur=ws.getDuration()

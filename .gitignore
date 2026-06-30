@@ -1,0 +1,7 @@
+# Abandoned native Android prototype — not part of the web app
+AudioMarker/
+
+# Editor / tooling
+.claude/
+.DS_Store
+node_modules/

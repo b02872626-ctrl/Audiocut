@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>AudioMarker</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root {
+  --bg: #0f0f1a;
+  --surface: #1a1a2e;
+  --surface2: #22223a;
+  --primary: #9f7aea;
+  --primary-dim: rgba(159,122,234,0.15);
+  --text: #e8e8f0;
+  --muted: #8080a8;
+  --border: #2a2a45;
+  --error: #fc8181;
+  --r: 10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+  background:var(--bg);color:var(--text);height:100dvh;display:flex;
+  flex-direction:column;overflow:hidden}
+
+/* ── Header ─────────────────────────────────────────── */
+header{display:flex;align-items:center;gap:10px;padding:12px 18px;
+  background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0}
+.in-telegram header{padding-top:max(12px, env(safe-area-inset-top))}
+header h1{font-size:1rem;font-weight:700;color:var(--primary);white-space:nowrap}
+#file-name{color:var(--muted);font-size:0.82rem;flex:1;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+
+/* ── Buttons ─────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;
+  border-radius:7px;border:none;font-size:0.78rem;font-weight:600;
+  cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{background:#b794f4}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed}
+.btn-outline{background:transparent;color:var(--text);border:1.5px solid var(--border)}
+.btn-outline:hover{border-color:var(--primary);color:var(--primary)}
+.btn-outline:disabled{opacity:.4;cursor:not-allowed}
+.btn-outline.active{border-color:#f6ad55;color:#f6ad55;background:rgba(246,173,85,.1)}
+
+/* ── Waveform ─────────────────────────────────────────── */
+#waveform-wrap{background:var(--surface);padding:6px 0;flex-shrink:0;position:relative}
+#waveform{cursor:crosshair}
+#pending-bar{position:absolute;top:0;bottom:0;pointer-events:none;display:none;
+  border-left:2px solid #f6ad55}
+
+/* ── Transport ─────────────────────────────────────────── */
+#transport{display:flex;align-items:center;gap:8px;padding:8px 18px;
+  background:var(--surface2);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.tbtn{background:var(--surface);border:1.5px solid var(--border);color:var(--text);
+  border-radius:50%;width:34px;height:34px;display:inline-flex;align-items:center;
+  justify-content:center;cursor:pointer;font-size:.9rem;transition:all .15s;flex-shrink:0}
+.tbtn:hover{border-color:var(--primary);color:var(--primary)}
+#play-btn{background:var(--primary);border-color:var(--primary);color:#fff;
+  width:42px;height:42px;font-size:1.2rem}
+#play-btn:hover{background:#b794f4;border-color:#b794f4}
+#seek-bar{flex:1;min-width:60px;accent-color:var(--primary);cursor:pointer;height:4px}
+#time-disp{font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums;
+  white-space:nowrap;min-width:100px}
+#speed-sel{background:var(--surface);border:1.5px solid var(--border);color:var(--text);
+  border-radius:7px;padding:4px 7px;font-size:.78rem;cursor:pointer;font-family:inherit}
+
+/* ── Clip toolbar ─────────────────────────────────────── */
+#clip-bar{display:flex;align-items:center;gap:7px;padding:7px 18px;
+  background:var(--bg);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+#pending-label{font-size:.75rem;color:#f6ad55;margin-left:2px}
+
+/* ── Clips section ────────────────────────────────────── */
+#clips-section{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+#clips-head{display:flex;align-items:center;gap:10px;padding:9px 18px 7px;flex-shrink:0}
+#clips-count{font-size:.8rem;font-weight:600;color:var(--muted);white-space:nowrap}
+#search{flex:1;background:var(--surface2);border:1.5px solid var(--border);
+  color:var(--text);border-radius:20px;padding:6px 13px;font-size:.8rem;
+  outline:none;font-family:inherit}
+#search:focus{border-color:var(--primary)}
+#search::placeholder{color:var(--muted)}
+#clips-list{flex:1;overflow-y:auto;padding:0 18px 14px}
+
+/* ── Clip card ───────────────────────────────────────── */
+.card{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--border);
+  border-radius:9px;margin-bottom:7px;overflow:hidden;transition:border-color .15s}
+.card:hover{border-color:var(--muted)}
+.card-row{display:flex;flex:1}
+.card-bar{width:4px;flex-shrink:0}
+.card-progress-track{position:relative;height:14px;flex-shrink:0;cursor:pointer;
+  display:flex;align-items:center;touch-action:none}
+.card-progress-track::before{content:'';position:absolute;left:0;right:0;height:5px;
+  background:rgba(255,255,255,.08);border-radius:3px}
+.card-progress-track:hover::before{background:rgba(255,255,255,.16)}
+.card-progress-fill{position:relative;height:5px;width:0%;border-radius:3px;
+  transition:width .06s linear;pointer-events:none}
+.card-progress-knob{position:absolute;width:12px;height:12px;border-radius:50%;
+  left:0;transform:translateX(-50%);box-shadow:0 1px 4px rgba(0,0,0,.5);
+  opacity:0;transition:opacity .12s,left .06s linear;pointer-events:none}
+.card-progress-track:hover .card-progress-knob,
+.card-progress-track.dragging .card-progress-knob{opacity:1}
+.card-progress-track.dragging .card-progress-fill{transition:none}
+.card-progress-track.dragging .card-progress-knob{transition:opacity .12s}
+.card-body{flex:1;padding:9px 11px 7px;min-width:0}
+/* mini player */
+.card-player{display:flex;align-items:center;gap:5px;margin-top:7px;padding-top:6px;
+  border-top:1px solid var(--border)}
+.cp-btn{background:none;border:1.5px solid var(--border);color:var(--muted);
+  border-radius:6px;padding:0 8px;height:26px;font-size:.78rem;cursor:pointer;
+  font-family:inherit;transition:all .12s;white-space:nowrap;display:inline-flex;
+  align-items:center;justify-content:center;gap:2px}
+.cp-btn span{font-size:.66rem;font-weight:700;font-variant-numeric:tabular-nums}
+.cp-btn:hover{border-color:var(--primary);color:var(--primary)}
+.cp-play{background:var(--primary) !important;border-color:var(--primary) !important;
+  color:#fff !important;width:28px;height:28px;border-radius:50%;font-size:.9rem;padding:0}
+.cp-play:hover{background:#b794f4 !important;border-color:#b794f4 !important}
+.cp-time{font-size:.7rem;color:var(--muted);font-variant-numeric:tabular-nums;
+  margin-left:auto;white-space:nowrap}
+.card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+.card-title{font-weight:600;font-size:.85rem;line-height:1.3}
+.card-time{font-size:.74rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.card-meta{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px;align-items:center}
+.card-cat{font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.tag{font-size:.68rem;background:var(--surface2);border:1px solid var(--border);
+  border-radius:4px;padding:1px 5px;color:var(--muted)}
+.card-notes{font-size:.75rem;color:var(--muted);margin-top:3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-actions{display:flex;flex-direction:column;align-items:center;
+  padding:5px 7px;gap:1px;flex-shrink:0}
+.ca{background:none;border:none;color:var(--muted);cursor:pointer;
+  font-size:.95rem;width:28px;height:28px;display:flex;align-items:center;
+  justify-content:center;border-radius:6px;transition:all .1s}
+.ca:hover{background:var(--surface2);color:var(--text)}
+.ca.play{color:var(--primary)}
+.ca.play:hover{background:var(--primary-dim)}
+.ca.del:hover{color:var(--error);background:rgba(252,129,129,.1)}
+.empty{text-align:center;padding:28px 16px;color:var(--muted);font-size:.82rem;line-height:1.7}
+
+/* ── Import screen ───────────────────────────────────── */
+#import-screen{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:14px;padding:40px;text-align:center}
+#import-screen .icon{font-size:4rem;opacity:.6}
+#import-screen h2{font-size:1.15rem}
+#import-screen p{color:var(--muted);font-size:.85rem;line-height:1.6}
+#import-screen.hidden{display:none}
+#player-ui{display:none;flex-direction:column;flex:1;min-height:0}
+#player-ui.visible{display:flex}
+
+/* ── Drop overlay ────────────────────────────────────── */
+#drop-overlay{position:fixed;inset:0;background:rgba(15,15,26,.92);
+  display:none;align-items:center;justify-content:center;z-index:90;
+  font-size:1.4rem;color:var(--primary);pointer-events:none;
+  border:3px dashed var(--primary);border-radius:var(--r);margin:16px}
+
+/* ── Modal ───────────────────────────────────────────── */
+#modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);
+  display:none;align-items:center;justify-content:center;z-index:200;padding:20px}
+#modal-bg.open{display:flex}
+#modal{background:var(--surface);border:1px solid var(--border);
+  border-radius:14px;padding:22px;width:100%;max-width:400px;
+  max-height:90dvh;overflow-y:auto}
+#modal h2{font-size:1rem;margin-bottom:16px}
+.time-row{display:flex;gap:16px;padding:9px 11px;background:var(--surface2);
+  border-radius:7px;margin-bottom:14px;font-size:.8rem;font-variant-numeric:tabular-nums}
+.time-row span{font-size:.68rem;color:var(--muted);display:block;margin-bottom:2px}
+.fg{margin-bottom:12px}
+.fg label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:4px;
+  font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.fi{width:100%;background:var(--surface2);border:1.5px solid var(--border);
+  color:var(--text);border-radius:7px;padding:8px 11px;font-size:.84rem;
+  outline:none;font-family:inherit}
+.fi:focus{border-color:var(--primary)}
+textarea.fi{resize:vertical;min-height:64px}
+select.fi option{background:var(--surface2)}
+.color-row{display:flex;gap:8px;flex-wrap:wrap}
+.swatch{width:26px;height:26px;border-radius:50%;cursor:pointer;
+  border:3px solid transparent;transition:border-color .1s;flex-shrink:0}
+.swatch.sel{border-color:#fff}
+.modal-btns{display:flex;gap:8px;justify-content:flex-end;margin-top:18px}
+
+/* ── Scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+
+<input type="file" id="file-input" accept="audio/*" style="display:none">
+
+<header>
+  <h1>🎵 AudioMarker</h1>
+  <span id="file-name">No file loaded</span>
+  <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">+ Import Audio</button>
+</header>
+
+<!-- Import screen -->
+<div id="import-screen">
+  <div class="icon">🎵</div>
+  <h2>Import an audio file to get started</h2>
+  <p>MP3, WAV, AAC, FLAC, OGG and more are supported.<br>Your clips are saved automatically by filename.</p>
+  <button class="btn btn-primary" style="font-size:.95rem;padding:11px 22px" onclick="document.getElementById('file-input').click()">+ Import Audio</button>
+</div>
+
+<!-- Player UI -->
+<div id="player-ui">
+  <div id="waveform-wrap">
+    <div id="waveform"></div>
+    <div id="pending-bar"></div>
+  </div>
+
+  <div id="transport">
+    <button class="tbtn" onclick="skip(-10)" title="Back 10s (←)">⏪</button>
+    <button class="tbtn" id="play-btn" onclick="togglePlay()" title="Play/Pause (Space)">▶</button>
+    <button class="tbtn" onclick="skip(10)" title="Forward 10s (→)">⏩</button>
+    <input type="range" id="seek-bar" min="0" max="100" value="0" step="0.01">
+    <span id="time-disp">0:00 / 0:00</span>
+    <select id="speed-sel" onchange="setSpeed(this.value)" title="Playback speed">
+      <option value="0.5">0.5×</option>
+      <option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option>
+      <option value="1.25">1.25×</option>
+      <option value="1.5">1.5×</option>
+      <option value="2">2×</option>
+    </select>
+  </div>
+
+  <div id="clip-bar">
+    <button class="btn btn-outline" onclick="addMarker()" title="Add single-point marker at current position (M)">📍 Marker</button>
+    <button class="btn btn-outline" id="btn-start" onclick="setStart()" title="Set range start here ([)">⏮ Set Start</button>
+    <button class="btn btn-outline" id="btn-end" onclick="setEnd()" title="Set range end here (])" disabled>⏭ Set End</button>
+    <button class="btn btn-primary"  id="btn-save" onclick="openSave()" title="Save clip" disabled>💾 Save Clip</button>
+    <span id="pending-label"></span>
+  </div>
+
+  <div id="clips-section">
+    <div id="clips-head">
+      <span id="clips-count">0 clips</span>
+      <input id="search" type="text" placeholder="🔍  Search clips…" oninput="onSearch(this.value)">
+    </div>
+    <div id="clips-list"></div>
+  </div>
+</div>
+
+<div id="drop-overlay">Drop audio file here 🎵</div>
+
+<!-- Modal -->
+<div id="modal-bg" onclick="bgClick(event)">
+  <div id="modal">
+    <h2 id="modal-title">New Clip</h2>
+    <div class="time-row" id="time-row">
+      <div><span>Start</span><strong id="mt-start">—</strong></div>
+      <div id="mt-end-wrap"><span>End</span><strong id="mt-end">—</strong></div>
+    </div>
+    <div class="fg"><label>Title *</label><input id="f-title" class="fi" placeholder="e.g. Key concept" oninput="updateSaveBtn()"></div>
+    <div class="fg"><label>Category</label>
+      <select id="f-cat" class="fi">
+        <option value="">— None —</option>
+        <option>Lecture</option><option>Key Point</option><option>Question</option>
+        <option>Review</option><option>Summary</option><option>Other</option>
+      </select>
+    </div>
+    <div class="fg"><label>Tags (comma-separated)</label><input id="f-tags" class="fi" placeholder="e.g. important, chapter3"></div>
+    <div class="fg"><label>Notes</label><textarea id="f-notes" class="fi" rows="3" placeholder="Optional…"></textarea></div>
+    <div class="fg"><label>Color</label><div class="color-row" id="color-row"></div></div>
+    <div class="modal-btns">
+      <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-primary" id="modal-save" onclick="confirmSave()" disabled>Save</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js'
+import RegionsPlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'
+
+// ── Telegram Mini App integration ─────────────────────────
+const tg = window.Telegram?.WebApp
+if (tg) {
+  tg.ready()
+  tg.expand()
+  try { tg.setHeaderColor('#0f0f1a'); tg.setBackgroundColor('#0f0f1a') } catch {}
+  if (tg.enableClosingConfirmation) tg.enableClosingConfirmation()
+  document.documentElement.classList.add('in-telegram')
+}
+
+// ── Colors ────────────────────────────────────────────────
+const COLORS = [
+  {bg:'rgba(159,122,234,.22)',line:'#9F7AEA'},
+  {bg:'rgba(72,187,120,.22)', line:'#48BB78'},
+  {bg:'rgba(99,179,237,.22)', line:'#63B3ED'},
+  {bg:'rgba(252,129,129,.22)',line:'#FC8181'},
+  {bg:'rgba(246,173,85,.22)', line:'#F6AD55'},
+  {bg:'rgba(118,228,247,.22)',line:'#76E4F7'},
+]
+
+// ── State ────────────────────────────────────────────────
+let ws = null, wsR = null, dur = 0, isSeeking = false
+let fileName = '', clips = []
+let pStart = null, pEnd = null, pMarker = false
+let editId = null, selColor = 0, query = ''
+let activeClipId = null, clipEndTimer = null
+
+// ── Load ────────────────────────────────────────────────
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) load(e.target.files[0])
+})
+document.addEventListener('dragover', e => {
+  e.preventDefault()
+  document.getElementById('drop-overlay').style.display = 'flex'
+})
+document.addEventListener('dragleave', e => {
+  if (!e.relatedTarget) document.getElementById('drop-overlay').style.display = 'none'
+})
+document.addEventListener('drop', e => {
+  e.preventDefault()
+  document.getElementById('drop-overlay').style.display = 'none'
+  const f = [...e.dataTransfer.files].find(f => f.type.startsWith('audio/'))
+  if (f) load(f)
+})
+
+async function load(file) {
+  fileName = file.name
+  document.getElementById('file-name').textContent = file.name
+  document.getElementById('import-screen').classList.add('hidden')
+  document.getElementById('player-ui').classList.add('visible')
+
+  if (ws) { ws.destroy(); ws = null }
+
+  wsR = RegionsPlugin.create()
+  ws = WaveSurfer.create({
+    container: '#waveform',
+    waveColor: 'rgba(200,200,225,.22)',
+    progressColor: '#9f7aea',
+    cursorColor: '#fff',
+    cursorWidth: 2,
+    height: 130,
+    normalize: true,
+    plugins: [wsR],
+  })
+
+  ws.on('ready', () => {
+    dur = ws.getDuration()
+    document.getElementById('seek-bar').max = dur
+    setTimeDisp(0)
+    refreshRegions()
+  })
+  ws.on('timeupdate', t => {
+    if (!isSeeking) { document.getElementById('seek-bar').value = t; setTimeDisp(t) }
+    clips.forEach(c => {
+      if (dragClip && dragClip.id === c.id) return // don't fight an active drag
+      const fill = document.getElementById('cp-' + c.id)
+      const knob = document.getElementById('cpk-' + c.id)
+      const timeEl = document.getElementById('cpt-' + c.id)
+      if (!fill) return
+      if (c.endTime > 0 && t >= c.startTime && t <= c.endTime) {
+        const elapsed = t - c.startTime
+        const total = c.endTime - c.startTime
+        const pct = (elapsed / total * 100)
+        fill.style.width = pct.toFixed(2) + '%'
+        if (knob) knob.style.left = pct.toFixed(2) + '%'
+        if (timeEl) timeEl.textContent = fmt(elapsed) + ' / ' + fmt(total)
+        // auto-stop at clip end
+        if (activeClipId === c.id && elapsed >= total - 0.1) {
+          ws.pause(); ws.seekTo(c.startTime / dur)
+          fill.style.width = '0%'
+          if (knob) knob.style.left = '0%'
+          if (timeEl) timeEl.textContent = '0:00 / ' + fmt(total)
+          updateClipBtns()
+        }
+      } else {
+        fill.style.width = '0%'
+        if (knob) knob.style.left = '0%'
+        if (timeEl && c.endTime > 0) timeEl.textContent = '0:00 / ' + fmt(c.endTime - c.startTime)
+      }
+    })
+  })
+  ws.on('play',   () => { document.getElementById('play-btn').textContent = '⏸'; updateClipBtns() })
+  ws.on('pause',  () => { document.getElementById('play-btn').textContent = '▶';  updateClipBtns() })
+  ws.on('finish', () => { document.getElementById('play-btn').textContent = '▶';  updateClipBtns() })
+  ws.loadBlob(file)
+
+  clips = loadDB(file.name)
+  pStart = pEnd = null; pMarker = false
+  syncPending()
+  render()
+}
+
+// ── Transport ────────────────────────────────────────────
+window.togglePlay = () => ws?.playPause()
+window.skip = s => {
+  if (!ws || !dur) return
+  ws.seekTo(Math.max(0, Math.min(1, (ws.getCurrentTime() + s) / dur)))
+}
+window.setSpeed = v => ws?.setPlaybackRate(+v)
+
+const seekBar = document.getElementById('seek-bar')
+seekBar.addEventListener('pointerdown', () => isSeeking = true)
+// Live scrub: move the waveform cursor in real-time as you drag
+seekBar.addEventListener('input', e => {
+  if (!ws || !dur) return
+  const t = +e.target.value
+  setTimeDisp(t)
+  ws.seekTo(t / dur)
+})
+seekBar.addEventListener('change', () => { isSeeking = false })
+
+function setTimeDisp(t) {
+  document.getElementById('time-disp').textContent = `${fmt(t)} / ${fmt(dur)}`
+}
+
+// ── Clip creation ────────────────────────────────────────
+window.addMarker = () => {
+  if (!ws) return
+  pStart = ws.getCurrentTime(); pEnd = null; pMarker = true
+  syncPending(); openModal()
+}
+window.setStart = () => {
+  if (!ws) return
+  pStart = ws.getCurrentTime(); pEnd = null; pMarker = false
+  syncPending()
+}
+window.setEnd = () => {
+  if (!ws || pStart == null) return
+  const t = ws.getCurrentTime()
+  if (t <= pStart) { alert('End must be after start.'); return }
+  pEnd = t; pMarker = false
+  syncPending()
+}
+window.openSave = () => { if (pStart != null) openModal() }
+
+function syncPending() {
+  const hs = pStart != null, he = pEnd != null
+  document.getElementById('btn-start').classList.toggle('active', hs && !he)
+  document.getElementById('btn-end').disabled = !hs
+  document.getElementById('btn-save').disabled = !hs
+  let msg = ''
+  if (hs) msg = `▶ ${fmt(pStart)}${he ? `  →  ${fmt(pEnd)}` : ''}`
+  document.getElementById('pending-label').textContent = msg
+
+  const bar = document.getElementById('pending-bar')
+  if (hs && dur > 0) {
+    const sl = (pStart / dur) * 100
+    bar.style.left = sl + '%'
+    bar.style.width = he ? ((pEnd - pStart) / dur * 100) + '%' : '0'
+    bar.style.background = he ? 'rgba(246,173,85,.18)' : 'transparent'
+    bar.style.display = 'block'
+  } else {
+    bar.style.display = 'none'
+  }
+}
+
+// ── Modal ────────────────────────────────────────────────
+function openModal() {
+  const isEdit = editId != null
+  const clip = isEdit ? clips.find(c => c.id === editId) : null
+  document.getElementById('modal-title').textContent = isEdit ? 'Edit Clip' : (pMarker ? 'New Marker' : 'New Range Clip')
+  const s = clip ? clip.startTime : pStart
+  const e = clip ? clip.endTime  : pEnd
+  document.getElementById('mt-start').textContent = fmt(s ?? 0)
+  document.getElementById('mt-end').textContent = (e && e > 0) ? fmt(e) : '—'
+  document.getElementById('mt-end-wrap').style.display = (!pMarker || isEdit) ? '' : 'none'
+  document.getElementById('f-title').value  = clip?.title ?? ''
+  document.getElementById('f-cat').value    = clip?.category ?? ''
+  document.getElementById('f-tags').value   = clip?.tags?.join(', ') ?? ''
+  document.getElementById('f-notes').value  = clip?.notes ?? ''
+  selColor = clip?.colorIndex ?? 0
+  renderColors()
+  updateSaveBtn()
+  document.getElementById('modal-bg').classList.add('open')
+  setTimeout(() => document.getElementById('f-title').focus(), 60)
+}
+window.closeModal = () => document.getElementById('modal-bg').classList.remove('open')
+window.bgClick = e => { if (e.target.id === 'modal-bg') closeModal() }
+
+function renderColors() {
+  document.getElementById('color-row').innerHTML = COLORS.map((c, i) =>
+    `<div class="swatch${i === selColor ? ' sel' : ''}" style="background:${c.line}" onclick="pickColor(${i})"></div>`
+  ).join('')
+}
+window.pickColor = i => { selColor = i; renderColors() }
+window.updateSaveBtn = () => {
+  document.getElementById('modal-save').disabled = !document.getElementById('f-title').value.trim()
+}
+
+window.confirmSave = () => {
+  const title = document.getElementById('f-title').value.trim()
+  if (!title) return
+  const tags = document.getElementById('f-tags').value.split(',').map(t => t.trim()).filter(Boolean)
+  const data = {
+    title, tags,
+    category: document.getElementById('f-cat').value,
+    notes:    document.getElementById('f-notes').value.trim(),
+    colorIndex: selColor,
+  }
+  if (editId) {
+    const c = clips.find(c => c.id === editId)
+    if (c) Object.assign(c, data)
+    editId = null
+  } else {
+    clips.push({ id: `${Date.now()}`, startTime: pStart, endTime: pMarker ? -1 : (pEnd ?? -1), createdAt: Date.now(), ...data })
+    pStart = pEnd = null; pMarker = false; syncPending()
+  }
+  saveDB(); render(); refreshRegions(); closeModal()
+}
+
+// ── Edit / delete / play ─────────────────────────────────
+window.editClip = id => {
+  editId = id
+  const c = clips.find(c => c.id === id)
+  pMarker = !c || c.endTime <= 0
+  openModal()
+}
+window.deleteClip = id => {
+  if (!confirm('Delete this clip?')) return
+  clips = clips.filter(c => c.id !== id)
+  saveDB(); render(); refreshRegions()
+}
+window.clipToggle = id => {
+  if (!ws || !dur) return
+  const c = clips.find(c => c.id === id); if (!c) return
+  if (activeClipId === id && ws.isPlaying()) {
+    ws.pause()
+  } else {
+    activeClipId = id
+    const cur = ws.getCurrentTime()
+    // seek to start if outside clip bounds
+    if (cur < c.startTime || (c.endTime > 0 && cur > c.endTime)) {
+      ws.seekTo(c.startTime / dur)
+    }
+    ws.play()
+  }
+}
+
+window.clipSkip = (id, secs) => {
+  if (!ws || !dur) return
+  const c = clips.find(c => c.id === id); if (!c) return
+  activeClipId = id
+  const lo = c.startTime
+  const hi = c.endTime > 0 ? c.endTime : dur
+  const newT = Math.max(lo, Math.min(hi, ws.getCurrentTime() + secs))
+  ws.seekTo(newT / dur)
+}
+
+// ── Clip progress drag-to-scrub (event delegation) ───────
+let dragTrack = null, dragClip = null
+function clipScrubTo(clientX) {
+  if (!dragTrack || !dragClip || !ws || !dur) return
+  const c = dragClip
+  const rect = dragTrack.getBoundingClientRect()
+  const pct = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+  activeClipId = c.id
+  // Move fill + knob immediately for a smooth feel, then seek
+  const fill = document.getElementById('cp-' + c.id)
+  const knob = document.getElementById('cpk-' + c.id)
+  if (fill) fill.style.width = (pct * 100) + '%'
+  if (knob) knob.style.left = (pct * 100) + '%'
+  const timeEl = document.getElementById('cpt-' + c.id)
+  const total = c.endTime - c.startTime
+  if (timeEl) timeEl.textContent = fmt(pct * total) + ' / ' + fmt(total)
+  ws.seekTo((c.startTime + pct * total) / dur)
+}
+document.getElementById('clips-list').addEventListener('pointerdown', e => {
+  const track = e.target.closest('.card-progress-track')
+  if (!track) return
+  const id = track.dataset.clip
+  const c = clips.find(c => c.id === id)
+  if (!c || c.endTime <= 0) return
+  e.preventDefault()
+  dragTrack = track; dragClip = c
+  track.classList.add('dragging')
+  track.setPointerCapture?.(e.pointerId)
+  clipScrubTo(e.clientX)
+})
+document.addEventListener('pointermove', e => { if (dragTrack) clipScrubTo(e.clientX) })
+document.addEventListener('pointerup', () => {
+  if (dragTrack) dragTrack.classList.remove('dragging')
+  dragTrack = null; dragClip = null
+})
+
+function updateClipBtns() {
+  clips.forEach(c => {
+    const btn = document.getElementById('cpb-' + c.id)
+    if (btn) btn.textContent = (activeClipId === c.id && ws?.isPlaying()) ? '⏸' : '▶'
+  })
+}
+
+// ── Render ────────────────────────────────────────────────
+function render() {
+  const q = query.toLowerCase()
+  const filtered = q ? clips.filter(c =>
+    c.title.toLowerCase().includes(q) ||
+    (c.category||'').toLowerCase().includes(q) ||
+    c.tags?.some(t => t.toLowerCase().includes(q)) ||
+    (c.notes||'').toLowerCase().includes(q)
+  ) : clips
+  const sorted = [...filtered].sort((a, b) => a.startTime - b.startTime)
+  document.getElementById('clips-count').textContent =
+    `${filtered.length}${filtered.length !== clips.length ? ` of ${clips.length}` : ''} clip${clips.length !== 1 ? 's' : ''}`
+
+  const list = document.getElementById('clips-list')
+  if (!sorted.length) {
+    list.innerHTML = `<div class="empty">${q ? 'No clips match your search.' : 'No clips yet.<br>Add a 📍 Marker or use Set Start → Set End → Save Clip.'}</div>`
+    return
+  }
+  list.innerHTML = sorted.map(c => {
+    const col = COLORS[c.colorIndex] ?? COLORS[0]
+    const isR = c.endTime > 0
+    const timeStr = isR ? `${fmt(c.startTime)} → ${fmt(c.endTime)} (${fmt(c.endTime - c.startTime)})` : `@ ${fmt(c.startTime)}`
+    const isActive = activeClipId === c.id
+    return `<div class="card">
+      <div class="card-row">
+        <div class="card-bar" style="background:${col.line}"></div>
+        <div class="card-body">
+          <div class="card-top">
+            <span class="card-title">${esc(c.title)}</span>
+            <div style="display:flex;align-items:center;gap:3px;flex-shrink:0">
+              ${isR ? `<span class="card-time">${timeStr}</span>` : `<span class="card-time">${timeStr}</span>`}
+              <button class="ca" onclick="editClip('${c.id}')" title="Edit" style="margin-left:4px">✏</button>
+              <button class="ca del" onclick="deleteClip('${c.id}')" title="Delete">✕</button>
+            </div>
+          </div>
+          ${(c.category || c.tags?.length) ? `<div class="card-meta">
+            ${c.category ? `<span class="card-cat" style="color:${col.line}">${esc(c.category)}</span>` : ''}
+            ${c.tags?.map(t => `<span class="tag">${esc(t)}</span>`).join('') ?? ''}
+          </div>` : ''}
+          ${c.notes ? `<div class="card-notes">${esc(c.notes)}</div>` : ''}
+          <div class="card-player">
+            <button class="cp-btn" onclick="clipSkip('${c.id}',-5)" title="Rewind 5 seconds">⏪<span>5s</span></button>
+            <button class="cp-btn cp-play" id="cpb-${c.id}" onclick="clipToggle('${c.id}')" title="Play / Pause">▶</button>
+            <button class="cp-btn" onclick="clipSkip('${c.id}',5)" title="Forward 5 seconds"><span>5s</span>⏩</button>
+            ${isR ? `<span class="cp-time" id="cpt-${c.id}">0:00 / ${fmt(c.endTime - c.startTime)}</span>` : `<span class="cp-time" id="cpt-${c.id}">@ ${fmt(c.startTime)}</span>`}
+          </div>
+        </div>
+      </div>
+      ${isR ? `<div class="card-progress-track" data-clip="${c.id}" title="Drag to scrub">
+        <div class="card-progress-fill" id="cp-${c.id}" style="background:${col.line}"></div>
+        <div class="card-progress-knob" id="cpk-${c.id}" style="background:${col.line}"></div>
+      </div>` : ''}
+    </div>`
+  }).join('')
+}
+
+function refreshRegions() {
+  if (!wsR || !dur) return
+  wsR.clearRegions()
+  clips.forEach(c => {
+    const col = COLORS[c.colorIndex] ?? COLORS[0]
+    const isR = c.endTime > 0
+    wsR.addRegion({
+      start: c.startTime,
+      end:   isR ? c.endTime : c.startTime + Math.max(dur * 0.003, 0.05),
+      color: isR ? col.bg : col.line + '99',
+      drag: false, resize: false, id: c.id,
+    })
+  })
+}
+
+// ── Search ────────────────────────────────────────────────
+window.onSearch = q => { query = q; render() }
+
+// ── Storage ────────────────────────────────────────────────
+function saveDB() {
+  try { localStorage.setItem('am:' + fileName, JSON.stringify(clips)) } catch {}
+}
+function loadDB(name) {
+  try { return JSON.parse(localStorage.getItem('am:' + name) || '[]') } catch { return [] }
+}
+
+// ── Utils ────────────────────────────────────────────────
+function fmt(s) {
+  s = Math.max(0, Math.floor(s))
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+  return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
+}
+function pad(n) { return String(n).padStart(2, '0') }
+function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') }
+
+// ── Keyboard shortcuts ────────────────────────────────────
+document.addEventListener('keydown', e => {
+  if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return
+  if (document.getElementById('modal-bg').classList.contains('open')) return
+  if (e.code === 'Space') {
+    e.preventDefault()
+    // A focused button would otherwise swallow Space — drop focus so playback always toggles
+    if (document.activeElement && document.activeElement.tagName === 'BUTTON') document.activeElement.blur()
+    togglePlay()
+  }
+  if (e.code === 'ArrowLeft')   skip(-5)
+  if (e.code === 'ArrowRight')  skip(5)
+  if (e.key  === 'm' || e.key === 'M') addMarker()
+  if (e.key  === '[') setStart()
+  if (e.key  === ']') setEnd()
+})
+</script>
+</body>
+</html>

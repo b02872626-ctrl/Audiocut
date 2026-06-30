@@ -274,8 +274,11 @@ import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js
 import RegionsPlugin from 'https://unpkg.com/wavesurfer.js@7/dist/plugins/regions.esm.js'
 
 // ── Telegram Mini App integration ─────────────────────────
+// The SDK injects window.Telegram.WebApp in ANY browser, so detect a real
+// in-Telegram launch via platform (it's "unknown" when not inside Telegram).
 const tg = window.Telegram?.WebApp
-if (tg) {
+const inTelegram = !!(tg && tg.platform && tg.platform !== 'unknown')
+if (inTelegram) {
   tg.ready()
   tg.expand()
   try { tg.setHeaderColor('#0f0f1a'); tg.setBackgroundColor('#0f0f1a') } catch {}
@@ -379,7 +382,7 @@ async function load(file) {
   ws.on('finish', () => { document.getElementById('play-btn').textContent = '▶';  updateClipBtns() })
   ws.loadBlob(file)
 
-  clips = loadDB(file.name)
+  clips = await loadDB(file.name)
   pStart = pEnd = null; pMarker = false
   syncPending()
   render()
@@ -659,11 +662,51 @@ function refreshRegions() {
 window.onSearch = q => { query = q; render() }
 
 // ── Storage ────────────────────────────────────────────────
-function saveDB() {
-  try { localStorage.setItem('am:' + fileName, JSON.stringify(clips)) } catch {}
+// In Telegram: clips sync across the user's devices via CloudStorage.
+// Elsewhere (or on unsupported clients): fall back to localStorage.
+const CS = (inTelegram && tg.CloudStorage && tg.CloudStorage.getItem) ? tg.CloudStorage : null
+const CHUNK = 3800 // CloudStorage caps values at 4096 chars; stay safely under
+
+// Map an arbitrary filename to a safe CloudStorage key base (allowed: A-Za-z0-9_-)
+function keyFor(name) {
+  let h = 0
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0
+  return 'am_' + h.toString(36)
 }
-function loadDB(name) {
-  try { return JSON.parse(localStorage.getItem('am:' + name) || '[]') } catch { return [] }
+const csGet    = k  => new Promise(r => CS.getItem(k, (e, v) => r(e ? null : v)))
+const csSet    = (k,v) => new Promise(r => CS.setItem(k, v, (e, ok) => r(!e && ok)))
+const csRemove = ks => new Promise(r => CS.removeItems(ks, () => r()))
+const lsLoad   = name => { try { return JSON.parse(localStorage.getItem('am:' + name) || '[]') } catch { return [] } }
+
+async function saveDB() {
+  const json = JSON.stringify(clips)
+  if (CS) {
+    const base = keyFor(fileName)
+    const oldN = parseInt((await csGet(base + '_n')) || '0', 10)
+    const chunks = []
+    for (let i = 0; i < json.length; i += CHUNK) chunks.push(json.slice(i, i + CHUNK))
+    await csSet(base + '_n', String(chunks.length))
+    for (let i = 0; i < chunks.length; i++) await csSet(base + '_' + i, chunks[i])
+    if (oldN > chunks.length) {
+      const stale = []
+      for (let i = chunks.length; i < oldN; i++) stale.push(base + '_' + i)
+      await csRemove(stale)
+    }
+    return
+  }
+  try { localStorage.setItem('am:' + fileName, json) } catch {}
+}
+
+async function loadDB(name) {
+  if (CS) {
+    const base = keyFor(name)
+    const n = parseInt((await csGet(base + '_n')) || '0', 10)
+    if (!n) return lsLoad(name) // first run / migrate from any local copy
+    let json = ''
+    for (let i = 0; i < n; i++) json += (await csGet(base + '_' + i)) || ''
+    try { return JSON.parse(json) } catch { return [] }
+  }
+  return lsLoad(name)
 }
 
 // ── Utils ────────────────────────────────────────────────
